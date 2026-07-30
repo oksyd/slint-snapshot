@@ -1,0 +1,51 @@
+[package]
+name = "slint-snapshot"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "Headless RGBA and PNG snapshots for compiled Slint components"
+license = "Apache-2.0"
+readme = "README.md"
+include = [
+    "/src/**",
+    "/Cargo.toml",
+    "/LICENSE",
+    "/README.md",
+]
+homepage = "https://github.com/oksyd/slint-snapshot"
+repository = "https://github.com/oksyd/slint-snapshot"
+documentation = "https://docs.rs/slint-snapshot"
+keywords = ["slint", "snapshot", "headless", "rgba", "png"]
+categories = ["development-tools::testing", "gui", "multimedia::images"]
+publish = true
+
+[features]
+default = []
+# Opt in when previews should discover and render fonts installed on the host.
+# Cargo features are additive: any other dependency enabling `slint/std` also
+# enables Slint's system-font stack for the final binary.
+system-fonts = ["slint/std"]
+
+[dependencies]
+png = { version = "0.18.1", default-features = false }
+slint = { version = "=1.17.1", default-features = false, features = [
+    "compat-1-2",
+    "libm",
+    "renderer-software",
+    "software-renderer-path",
+    "unsafe-single-threaded",
+] }
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+
+[package.metadata.release]
+tag-prefix = ""
+tag-name = "{{prefix}}{{version}}"
+pre-release-commit-message = "chore: release {{crate_name}} version {{version}}"
+tag-message = "chore: release {{crate_name}} version {{version}}"
+pre-release-hook = ["git", "cliff", "-o", "CHANGELOG.md", "--tag", "{{version}}"]

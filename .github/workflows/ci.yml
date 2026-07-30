@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: 1.97.1
+
+jobs:
+  default-features:
+    name: Default features
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check crate
+        run: cargo check --locked --all-targets
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked --all-targets
+
+      - name: Check documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --no-deps
+
+      - name: Verify no runtime Fontconfig dependency
+        shell: bash
+        run: |
+          test_binary="$(find target/debug/deps -maxdepth 1 -type f -executable -name 'slint_snapshot-*' | head -n 1)"
+          test -n "${test_binary}"
+          if ldd "${test_binary}" | grep -qi fontconfig; then
+            echo "default-feature preview unexpectedly links Fontconfig" >&2
+            exit 1
+          fi
+
+      - name: Verify package
+        run: cargo package --locked
+
+  system-fonts:
+    name: System fonts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
+
+      - name: Install Fontconfig development files
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libfontconfig1-dev
+
+      - name: Check all features
+        run: cargo check --locked --all-targets --all-features
+
+      - name: Run Clippy with all features
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Test all features
+        run: cargo test --locked --all-targets --all-features
+
+      - name: Check all-feature documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --no-deps --all-features

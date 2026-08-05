@@ -4,6 +4,10 @@
 //! locales, command-line parsing, and asset export belong in each project's
 //! preview runner.
 //!
+//! Pure in-memory RGBA comparison is available in [`comparison`]. The optional
+//! `testing` Cargo feature adds PNG baselines, explicit create/accept modes,
+//! failure artifacts, and test assertions.
+//!
 //! The runtime does not connect to a desktop or windowing system. By default,
 //! it also does not enable Slint's system-font stack or link the final preview
 //! executable to Fontconfig.
@@ -14,7 +18,7 @@
 //! # Threading
 //!
 //! The default feature set uses Slint's `unsafe-single-threaded` runtime.
-//! [`PreviewRuntime`] is neither `Send` nor `Sync`; create, use, and drop it on
+//! [`SnapshotRuntime`] is neither `Send` nor `Sync`; create, use, and drop it on
 //! one thread. The optional `system-fonts` feature enables `slint/std`.
 //!
 //! # Fonts and resources
@@ -30,7 +34,7 @@
 //!
 //! ```
 //! use slint::ComponentHandle;
-//! use slint_snapshot::PreviewRuntime;
+//! use slint_snapshot::SnapshotRuntime;
 //!
 //! slint::slint! {
 //!     export component ColorCard inherits Window {
@@ -45,11 +49,11 @@
 //! }
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let runtime = PreviewRuntime::new()?;
+//! let runtime = SnapshotRuntime::new()?;
 //! let ui = ColorCard::new().expect("create the Slint component");
 //! runtime.set_size(ui.window(), (320, 180), 1.0)?;
 //!
-//! let frame = runtime.render_rgba(ui.window())?;
+//! let frame = runtime.render(ui.window())?;
 //! assert_eq!(frame.dimensions(), (320, 180));
 //! let png = frame.encode_png()?;
 //! assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
@@ -57,8 +61,14 @@
 //! # }
 //! ```
 
-mod runtime;
+pub mod comparison;
+pub mod frame;
+mod png_codec;
+pub mod runtime;
 
-pub use runtime::{
-    DEFAULT_MAX_PIXELS, PreviewRuntime, PreviewWindow, RenderedFrame, SnapshotError,
-};
+#[cfg(feature = "testing")]
+#[cfg_attr(docsrs, doc(cfg(feature = "testing")))]
+pub mod testing;
+
+pub use frame::RenderedFrame;
+pub use runtime::SnapshotRuntime;

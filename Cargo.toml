@@ -21,6 +21,8 @@ publish = true
 
 [features]
 default = []
+# Enables PNG baseline management, failure artifacts, and cargo-test helpers.
+testing = ["dep:tempfile"]
 # Opt in when previews should discover and render fonts installed on the host.
 # Cargo features are additive: any other dependency enabling `slint/std` also
 # enables Slint's system-font stack for the final binary.
@@ -28,6 +30,7 @@ system-fonts = ["slint/std"]
 
 [dependencies]
 png = { version = "0.18.1", default-features = false }
+tempfile = { version = "3.27.0", optional = true }
 slint = { version = "=1.17.1", default-features = false, features = [
     "compat-1-2",
     "libm",

@@ -1,6 +1,6 @@
 [package]
 name = "slint-snapshot"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.98.1"
 description = "Headless RGBA and PNG snapshots for compiled Slint components"

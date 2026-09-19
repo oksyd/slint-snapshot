@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::comparison::{InvalidRgbaImage, RgbaView};
 use crate::png_codec;
 
-use super::SnapshotTestError;
+use super::{SnapshotTestError, SnapshotWriteError};
 
 pub(crate) struct OwnedRgbaImage {
     width: u32,
@@ -28,9 +28,9 @@ impl OwnedRgbaImage {
     }
 }
 
-pub(crate) fn encode_png(image: RgbaView<'_>, path: &Path) -> Result<Vec<u8>, SnapshotTestError> {
+pub(crate) fn encode_png(image: RgbaView<'_>, path: &Path) -> Result<Vec<u8>, SnapshotWriteError> {
     png_codec::encode_rgba8(image.width(), image.height(), image.rgba8()).map_err(|source| {
-        SnapshotTestError::PngEncoding {
+        SnapshotWriteError::PngEncoding {
             path: path.to_path_buf(),
             source,
         }
@@ -148,12 +148,12 @@ fn normalize_decoded_png(
     match output.color_type {
         png::ColorType::Rgba => rgba.extend_from_slice(output_bytes),
         png::ColorType::Rgb => {
-            for pixel in output_bytes.chunks_exact(3) {
+            for pixel in output_bytes.as_chunks::<3>().0 {
                 rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
             }
         }
         png::ColorType::GrayscaleAlpha => {
-            for pixel in output_bytes.chunks_exact(2) {
+            for pixel in output_bytes.as_chunks::<2>().0 {
                 rgba.extend_from_slice(&[pixel[0], pixel[0], pixel[0], pixel[1]]);
             }
         }

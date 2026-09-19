@@ -29,6 +29,9 @@
 //! font and select it with `default-font-family` when snapshot reproducibility
 //! matters. Cargo features are additive, so another dependency enabling
 //! `slint/std` also enables Slint's system-font stack for the final binary.
+//! It also enables rendering of `Path` elements; the default configuration
+//! does not render those elements. On Linux, building with `system-fonts`
+//! requires the Fontconfig development files discoverable by `pkg-config`.
 //!
 //! # Example
 //!
@@ -60,6 +63,8 @@
 //! # Ok(())
 //! # }
 //! ```
+
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod comparison;
 pub mod frame;

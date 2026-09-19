@@ -9,7 +9,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTUP_TOOLCHAIN: 1.97.1
+  RUSTUP_TOOLCHAIN: 1.98.1
 
 jobs:
   default-features:
@@ -22,7 +22,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
+        run: rustup toolchain install 1.98.1 --profile minimal --component clippy,rustfmt
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -41,6 +41,13 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --locked --no-deps
 
+      - name: Check testing API documentation and examples
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: |
+          cargo doc --locked --no-deps --features testing
+          cargo test --locked --doc --features testing
+
       - name: Verify no runtime Fontconfig dependency
         shell: bash
         run: |
@@ -54,9 +61,21 @@ jobs:
       - name: Verify package
         run: cargo package --locked
 
+      - name: Install nightly for docs.rs configuration
+        run: rustup toolchain install nightly --profile minimal
+
+      - name: Check docs.rs configuration
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+        run: cargo +nightly doc --locked --no-deps --features testing
+
   system-fonts:
-    name: System fonts
-    runs-on: ubuntu-latest
+    name: All features (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -64,9 +83,10 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
+        run: rustup toolchain install 1.98.1 --profile minimal --component clippy,rustfmt
 
       - name: Install Fontconfig development files
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --yes libfontconfig1-dev
@@ -79,6 +99,9 @@ jobs:
 
       - name: Test all features
         run: cargo test --locked --all-targets --all-features
+
+      - name: Test all-feature documentation examples
+        run: cargo test --locked --doc --all-features
 
       - name: Check all-feature documentation
         env:

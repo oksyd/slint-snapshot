@@ -111,7 +111,11 @@ impl FrameEncodeError {
 
 impl fmt::Display for FrameEncodeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("failed to encode the rendered frame as PNG")
+        write!(
+            formatter,
+            "failed to encode the rendered frame as PNG: {}",
+            self.source
+        )
     }
 }
 
@@ -126,13 +130,19 @@ impl StdError for FrameEncodeError {
 #[non_exhaustive]
 pub enum FrameWriteError {
     /// Frame output paths must end in `.png`.
-    InvalidOutputExtension { path: PathBuf },
+    InvalidOutputExtension {
+        /// Path associated with the failed operation.
+        path: PathBuf,
+    },
     /// Encoding the frame failed before any file was written.
     Encoding(FrameEncodeError),
     /// Creating the parent directory or writing the file failed.
     Io {
+        /// Description of the attempted filesystem or platform operation.
         operation: &'static str,
+        /// Path associated with the failed operation.
         path: PathBuf,
+        /// Underlying error.
         source: io::Error,
     },
 }
@@ -145,12 +155,14 @@ impl fmt::Display for FrameWriteError {
                 "frame output must use the .png extension: {}",
                 path.display()
             ),
-            Self::Encoding(_) => formatter.write_str("failed to encode the rendered frame"),
+            Self::Encoding(source) => source.fmt(formatter),
             Self::Io {
-                operation, path, ..
+                operation,
+                path,
+                source,
             } => write!(
                 formatter,
-                "failed to {operation} frame path {}",
+                "failed to {operation} frame path {}: {source}",
                 path.display()
             ),
         }

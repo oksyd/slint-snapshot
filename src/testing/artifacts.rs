@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 use crate::comparison::{ComparisonPolicy, RgbaView};
 
 use super::codec::{OwnedRgbaImage, encode_png};
-use super::error::{ArtifactPaths, SnapshotTestError};
+use super::error::{ArtifactPaths, SnapshotWriteError};
 use super::store::{WriteMode, atomic_write, remove_if_present};
 
 pub(crate) fn write_missing_actual(
     artifact_dir: &Path,
     actual: RgbaView<'_>,
-) -> Result<PathBuf, SnapshotTestError> {
+) -> Result<PathBuf, SnapshotWriteError> {
     let expected_path = artifact_dir.join("expected.png");
     let actual_path = artifact_dir.join("actual.png");
     let diff_path = artifact_dir.join("diff.png");
@@ -27,7 +27,7 @@ pub(crate) fn write_mismatch_artifacts(
     actual: RgbaView<'_>,
     policy: ComparisonPolicy,
     max_pixels: u64,
-) -> Result<ArtifactPaths, SnapshotTestError> {
+) -> Result<ArtifactPaths, SnapshotWriteError> {
     let expected_path = artifact_dir.join("expected.png");
     let actual_path = artifact_dir.join("actual.png");
     let diff_path = artifact_dir.join("diff.png");
@@ -86,7 +86,7 @@ fn create_diff_image(
                 }
                 (Some(_), None) => [255, 0, 0, 255],
                 (None, Some(_)) => [0, 255, 255, 255],
-                (None, None) => unreachable!("diff canvas contains at least one image"),
+                (None, None) => [0, 0, 0, 0],
             };
             output.extend_from_slice(&display_pixel);
         }

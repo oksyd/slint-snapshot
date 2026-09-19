@@ -2,7 +2,7 @@
 name = "slint-snapshot"
 version = "0.1.1"
 edition = "2024"
-rust-version = "1.97.1"
+rust-version = "1.98.1"
 description = "Headless RGBA and PNG snapshots for compiled Slint components"
 license = "Apache-2.0"
 readme = "README.md"
@@ -25,22 +25,21 @@ default = []
 testing = ["dep:tempfile"]
 # Opt in when previews should discover and render fonts installed on the host.
 # Cargo features are additive: any other dependency enabling `slint/std` also
-# enables Slint's system-font stack for the final binary.
+# enables Slint's system-font stack and Path rendering for the final binary.
 system-fonts = ["slint/std"]
 
 [dependencies]
 png = { version = "0.18.1", default-features = false }
 tempfile = { version = "3.27.0", optional = true }
-slint = { version = "=1.17.1", default-features = false, features = [
-    "compat-1-2",
-    "libm",
-    "renderer-software",
-    "software-renderer-path",
-    "unsafe-single-threaded",
-] }
+slint = { version = "1.18.0", default-features = false, features = ["compat-1-2", "libm", "renderer-software", "unsafe-single-threaded"] }
 
 [lints.rust]
 unsafe_code = "deny"
+missing_docs = "warn"
+
+[package.metadata.docs.rs]
+features = ["testing"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.clippy]
 all = "warn"

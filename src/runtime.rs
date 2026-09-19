@@ -1,16 +1,18 @@
 //! Headless Slint runtime configuration and rendering.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::error::Error as StdError;
 use std::fmt;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
-use slint::platform::software_renderer::{RepaintBufferType, SoftwareRenderer};
+use slint::platform::software_renderer::{
+    PremultipliedRgbaColor, RepaintBufferType, SoftwareRenderer,
+};
 use slint::platform::{
     Platform, PlatformError, Renderer, WindowAdapter, WindowEvent, WindowProperties,
 };
-use slint::{LogicalSize, PhysicalSize, WindowSize};
+use slint::{LogicalSize, PhysicalSize, Rgba8Pixel, SharedPixelBuffer, WindowSize};
 
 use crate::frame::RenderedFrame;
 
@@ -73,14 +75,19 @@ impl RuntimeBuilder {
             });
         }
 
-        let window = HeadlessWindow::new(self.max_pixels);
+        let windows = Rc::new(RefCell::new(Vec::new()));
         let clock = RuntimeClock::new(self.clock_mode);
         slint::platform::set_platform(Box::new(SnapshotPlatform {
-            window: Rc::clone(&window),
+            windows: Rc::clone(&windows),
+            max_pixels: self.max_pixels,
             clock: clock.clone(),
         }))
         .map_err(|_| RuntimeError::PlatformAlreadyInitialized)?;
-        Ok(SnapshotRuntime { window, clock })
+        Ok(SnapshotRuntime {
+            windows,
+            max_pixels: self.max_pixels,
+            clock,
+        })
     }
 }
 
@@ -97,41 +104,75 @@ impl Default for RuntimeBuilder {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum RuntimeError {
+    /// The supplied window was not created by this runtime.
+    UnknownWindow,
     /// Slint already has a platform installed for the current process.
     PlatformAlreadyInitialized,
     /// Slint failed while operating on the component.
     Platform {
+        /// Description of the attempted filesystem or platform operation.
         operation: &'static str,
+        /// Error message returned by Slint.
         message: String,
     },
     /// The requested logical width or height is zero.
-    InvalidLogicalSize { width: u32, height: u32 },
+    InvalidLogicalSize {
+        /// Requested width in logical pixels.
+        width: u32,
+        /// Requested height in logical pixels.
+        height: u32,
+    },
     /// The scale factor is zero, negative, infinite, or NaN.
-    InvalidScaleFactor { scale_factor: f32 },
+    InvalidScaleFactor {
+        /// Requested ratio of physical pixels to logical pixels.
+        scale_factor: f32,
+    },
     /// Scaling the logical size cannot produce a valid physical size.
     PhysicalSizeOverflow {
+        /// Requested width in logical pixels.
         width: u32,
+        /// Requested height in logical pixels.
         height: u32,
+        /// Requested ratio of physical pixels to logical pixels.
         scale_factor: f32,
     },
     /// Slint reported an invalid preferred size.
-    InvalidPreferredSize { width: f32, height: f32 },
+    InvalidPreferredSize {
+        /// Requested width in logical pixels.
+        width: f32,
+        /// Requested height in logical pixels.
+        height: f32,
+    },
     /// The component has an empty physical rendering surface.
-    EmptyPhysicalSize { width: u32, height: u32 },
+    EmptyPhysicalSize {
+        /// Requested width in physical pixels.
+        width: u32,
+        /// Requested height in physical pixels.
+        height: u32,
+    },
     /// The requested frame exceeds the runtime's memory safety budget.
     PixelLimitExceeded {
+        /// Requested width in physical pixels.
         width: u32,
+        /// Requested height in physical pixels.
         height: u32,
+        /// Total physical pixel count (width multiplied by height).
         pixels: u64,
+        /// Configured maximum physical pixel count; must be non-zero.
         max_pixels: u64,
     },
     /// A zero-pixel runtime budget was requested.
-    InvalidPixelLimit { max_pixels: u64 },
+    InvalidPixelLimit {
+        /// Configured maximum physical pixel count; must be non-zero.
+        max_pixels: u64,
+    },
     /// Manual advancement was requested from a real-time clock.
     ManualClockRequired,
     /// Advancing the manual clock overflowed [`Duration`].
     ClockOverflow {
+        /// Elapsed manual-clock time before the attempted advance.
         elapsed: Duration,
+        /// Requested amount of time to add.
         advance: Duration,
     },
 }
@@ -139,6 +180,9 @@ pub enum RuntimeError {
 impl fmt::Display for RuntimeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnknownWindow => {
+                formatter.write_str("the window does not belong to this snapshot runtime")
+            }
             Self::PlatformAlreadyInitialized => {
                 formatter.write_str("the Slint platform is already initialized")
             }
@@ -200,8 +244,15 @@ impl StdError for RuntimeError {}
 /// Slint permits only one platform per process. Create one runtime and reuse it
 /// for every component rendered by a preview or test executable. This type is
 /// neither `Send` nor `Sync`.
+/// Each component gets its own window and renderer. Inject events through
+/// the component's `window()`; only the clock and pixel budget are shared.
+///
+/// Install the runtime before constructing any Slint components. Dropping it
+/// does not uninstall Slint's platform or permit installing a replacement.
+/// Keep the runtime alive for as long as you need its rendering and clock APIs.
 pub struct SnapshotRuntime {
-    window: Rc<HeadlessWindow>,
+    windows: Rc<RefCell<Vec<Weak<HeadlessWindow>>>>,
+    max_pixels: u64,
     clock: RuntimeClock,
 }
 
@@ -222,16 +273,24 @@ impl SnapshotRuntime {
         RuntimeBuilder::default()
     }
 
-    /// Returns the underlying Slint window for advanced event injection.
-    #[must_use]
-    pub fn window(&self) -> &slint::Window {
-        &self.window.window
+    fn adapter(&self, window: &slint::Window) -> Result<Rc<HeadlessWindow>, RuntimeError> {
+        // HeadlessWindow lives at a stable Rc allocation; WindowAdapter exposes
+        // that exact Window by reference. Compare identity, not window properties.
+        // Weak entries do not keep components alive; upgrading pins the adapter
+        // only for this operation. A linear scan suits the small window count
+        // of snapshot tests and needs no separately maintained pointer index.
+        self.windows
+            .borrow()
+            .iter()
+            .filter_map(Weak::upgrade)
+            .find(|adapter| std::ptr::eq(std::ptr::from_ref(&adapter.window), window))
+            .ok_or(RuntimeError::UnknownWindow)
     }
 
     /// Returns the maximum physical pixel count accepted for one frame.
     #[must_use]
     pub fn max_pixels(&self) -> u64 {
-        self.window.max_pixels
+        self.max_pixels
     }
 
     /// Returns the configured clock mode.
@@ -262,11 +321,14 @@ impl SnapshotRuntime {
     ///
     /// Fractional scale factors such as `1.25` and `1.5` are supported. The
     /// resulting physical size is returned for snapshot metadata.
+    /// Fractional physical dimensions are truncated toward zero; each scaled
+    /// dimension must be at least one pixel before truncation.
     ///
     /// # Errors
     ///
     /// Returns an error for an empty logical size, an invalid scale factor,
     /// physical dimension overflow, or a frame over the configured budget.
+    /// Returns [`RuntimeError::UnknownWindow`] if the window belongs to another platform.
     pub fn set_size(
         &self,
         component_window: &slint::Window,
@@ -274,11 +336,10 @@ impl SnapshotRuntime {
         scale_factor: f32,
     ) -> Result<PhysicalSize, RuntimeError> {
         let physical_size = checked_physical_size(logical_size, scale_factor)?;
-        self.window.validate_physical_size(physical_size)?;
+        let window = self.adapter(component_window)?;
+        window.validate_physical_size(physical_size)?;
 
-        self.window
-            .window
-            .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor });
+        component_window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor });
         component_window.set_size(physical_size);
         Ok(physical_size)
     }
@@ -286,23 +347,29 @@ impl SnapshotRuntime {
     /// Applies the component's current Slint preferred size and returns the
     /// selected logical dimensions.
     ///
+    /// This shows the component to measure its layout, then hides it. It does
+    /// not restore the previous visibility. Preferred dimensions are rounded
+    /// up to whole logical pixels before applying [`Self::set_size`].
+    ///
     /// # Errors
     ///
     /// Returns an error when Slint cannot show or hide the component, when the
     /// preferred size is invalid, or when the resulting frame exceeds the
-    /// configured budget.
+    /// configured budget. Invalid scaling follows [`Self::set_size`]'s error
+    /// contract. Returns [`RuntimeError::UnknownWindow`] for a foreign window.
     pub fn use_preferred_size(
         &self,
         component_window: &slint::Window,
         scale_factor: f32,
     ) -> Result<(u32, u32), RuntimeError> {
+        let window = self.adapter(component_window)?;
         component_window.show().map_err(|error| {
             platform_error(
                 "show the component while measuring its preferred size",
                 &error,
             )
         })?;
-        let preferred_size = self.window.preferred_size();
+        let preferred_size = window.preferred_size();
         component_window.hide().map_err(|error| {
             platform_error(
                 "hide the component after measuring its preferred size",
@@ -323,22 +390,18 @@ impl SnapshotRuntime {
     /// # Errors
     ///
     /// Returns an error when the component has no rendering surface, exceeds
-    /// the configured pixel budget, or Slint cannot produce a snapshot.
+    /// the configured pixel budget, or is not owned by this runtime
+    /// ([`RuntimeError::UnknownWindow`]).
     pub fn render(&self, component_window: &slint::Window) -> Result<RenderedFrame, RuntimeError> {
+        let window = self.adapter(component_window)?;
         slint::platform::update_timers_and_animations();
-        self.window
-            .validate_physical_size(self.window.physical_size())?;
-        self.window.window.request_redraw();
-        let _ = component_window
-            .take_snapshot()
-            .map_err(|error| platform_error("produce the initial snapshot pass", &error))?;
+        window.validate_physical_size(window.physical_size())?;
+        component_window.request_redraw();
+        let _ = window.render_pixels();
         slint::platform::update_timers_and_animations();
-        self.window
-            .validate_physical_size(self.window.physical_size())?;
-        self.window.window.request_redraw();
-        let pixels = component_window
-            .take_snapshot()
-            .map_err(|error| platform_error("produce the final snapshot pass", &error))?;
+        window.validate_physical_size(window.physical_size())?;
+        component_window.request_redraw();
+        let pixels = window.take_snapshot();
         Ok(RenderedFrame::from_pixels(pixels))
     }
 }
@@ -461,7 +524,8 @@ impl RuntimeClock {
 }
 
 struct SnapshotPlatform {
-    window: Rc<HeadlessWindow>,
+    windows: Rc<RefCell<Vec<Weak<HeadlessWindow>>>>,
+    max_pixels: u64,
     clock: RuntimeClock,
 }
 
@@ -511,6 +575,43 @@ impl HeadlessWindow {
         }
         Ok(())
     }
+
+    fn render_pixels(&self) -> SharedPixelBuffer<PremultipliedRgbaColor> {
+        let size = self.physical_size();
+        let mut premultiplied =
+            SharedPixelBuffer::<PremultipliedRgbaColor>::new(size.width, size.height);
+        self.renderer
+            .render(premultiplied.make_mut_slice(), size.width as usize);
+        premultiplied
+    }
+
+    fn take_snapshot(&self) -> SharedPixelBuffer<Rgba8Pixel> {
+        let premultiplied = self.render_pixels();
+        let mut rgba =
+            SharedPixelBuffer::<Rgba8Pixel>::new(premultiplied.width(), premultiplied.height());
+        for (target, source) in rgba
+            .make_mut_slice()
+            .iter_mut()
+            .zip(premultiplied.as_slice())
+        {
+            let alpha = source.alpha;
+            if alpha == 0 {
+                *target = Rgba8Pixel::new(0, 0, 0, 0);
+            } else {
+                let unpremultiply = |channel: u8| {
+                    ((u32::from(channel) * 255 + u32::from(alpha) / 2) / u32::from(alpha)).min(255)
+                        as u8
+                };
+                *target = Rgba8Pixel::new(
+                    unpremultiply(source.red),
+                    unpremultiply(source.green),
+                    unpremultiply(source.blue),
+                    alpha,
+                );
+            }
+        }
+        rgba
+    }
 }
 
 impl WindowAdapter for HeadlessWindow {
@@ -542,7 +643,13 @@ impl WindowAdapter for HeadlessWindow {
 
 impl Platform for SnapshotPlatform {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
-        Ok(Rc::clone(&self.window) as Rc<dyn WindowAdapter>)
+        let window = HeadlessWindow::new(self.max_pixels);
+        let mut windows = self.windows.borrow_mut();
+        // Prune expired entries when creating a window so sequential snapshots
+        // do not accumulate registry entries. The registry owns no adapters.
+        windows.retain(|window| window.strong_count() > 0);
+        windows.push(Rc::downgrade(&window));
+        Ok(window)
     }
 
     fn duration_since_start(&self) -> Duration {
@@ -553,6 +660,7 @@ impl Platform for SnapshotPlatform {
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
+    use std::rc::Rc;
     use std::time::Duration;
 
     use slint::{ComponentHandle, LogicalSize};
@@ -566,11 +674,12 @@ mod tests {
     slint::slint! {
         export component DynamicPreferredSize inherits Window {
             in property <bool> expanded;
+            in property <color> fill: #336699;
             preferred-width: 240px;
             preferred-height: root.expanded ? 180px : 120px;
             min-width: self.preferred-width;
             min-height: self.preferred-height;
-            background: #336699;
+            background: root.fill;
         }
     }
 
@@ -598,10 +707,7 @@ mod tests {
                 .expect("base preferred size"),
             (240, 120)
         );
-        assert_eq!(
-            runtime.window.physical_size(),
-            slint::PhysicalSize::new(360, 180)
-        );
+        assert_eq!(ui.window().size(), slint::PhysicalSize::new(360, 180));
 
         ui.set_expanded(true);
         assert_eq!(
@@ -617,8 +723,10 @@ mod tests {
         assert!(
             frame
                 .rgba8()
-                .chunks_exact(4)
-                .all(|pixel| pixel == [0x33, 0x66, 0x99, 0xff])
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == [0x33, 0x66, 0x99, 0xff])
         );
 
         let encoded = frame.encode_png().expect("in-memory PNG");
@@ -637,6 +745,20 @@ mod tests {
         assert_eq!(output.bit_depth, png::BitDepth::Eight);
         assert_eq!(&decoded[..output.buffer_size()], frame.rgba8());
 
+        ui.set_fill(slint::Color::from_argb_u8(128, 255, 0, 0));
+        let translucent = runtime.render(ui.window()).expect("translucent frame");
+        assert!(
+            translucent
+                .rgba8()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == [255, 0, 0, 128])
+        );
+        ui.set_fill(slint::Color::from_argb_u8(0, 0, 0, 0));
+        let transparent = runtime.render(ui.window()).expect("transparent frame");
+        assert!(transparent.rgba8().iter().all(|&channel| channel == 0));
+
         let invalid_output = std::env::temp_dir().join("slint-snapshot.invalid");
         assert!(matches!(
             frame.write_png(&invalid_output),
@@ -653,6 +775,49 @@ mod tests {
         assert!(matches!(
             SnapshotRuntime::new(),
             Err(RuntimeError::PlatformAlreadyInitialized)
+        ));
+        verify_independent_windows(&runtime);
+    }
+
+    fn verify_independent_windows(runtime: &SnapshotRuntime) {
+        let first = DynamicPreferredSize::new().unwrap();
+        first.set_fill(slint::Color::from_rgb_u8(255, 0, 0));
+        runtime.use_preferred_size(first.window(), 1.0).unwrap();
+        let second = DynamicPreferredSize::new().unwrap();
+        second.set_expanded(true);
+        second.set_fill(slint::Color::from_rgb_u8(0, 0, 255));
+        runtime.use_preferred_size(second.window(), 1.5).unwrap();
+
+        for _ in 0..2 {
+            for (ui, size, color, scale) in [
+                (&first, (240, 120), [255, 0, 0, 255], 1.0),
+                (&second, (360, 270), [0, 0, 255, 255], 1.5),
+            ] {
+                let frame = runtime.render(ui.window()).unwrap();
+                assert_eq!(frame.dimensions(), size);
+                assert!(
+                    frame
+                        .rgba8()
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .all(|pixel| *pixel == color)
+                );
+                assert!((ui.window().scale_factor() - scale).abs() < f32::EPSILON);
+            }
+        }
+        let second_adapter = Rc::downgrade(&runtime.adapter(second.window()).unwrap());
+        drop(second);
+        assert!(second_adapter.upgrade().is_none());
+        assert_eq!(
+            &runtime.render(first.window()).unwrap().rgba8()[..4],
+            &[255, 0, 0, 255]
+        );
+
+        let foreign = super::HeadlessWindow::new(100);
+        assert!(matches!(
+            runtime.render(&foreign.window),
+            Err(RuntimeError::UnknownWindow)
         ));
     }
 

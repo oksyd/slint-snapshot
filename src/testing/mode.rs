@@ -89,7 +89,10 @@ impl StdError for ParseSnapshotModeError {}
 #[non_exhaustive]
 pub enum SnapshotModeEnvError {
     /// The environment variable was not valid Unicode.
-    NotUnicode { value: OsString },
+    NotUnicode {
+        /// Environment variable contents that could not be decoded as Unicode.
+        value: OsString,
+    },
     /// The Unicode value was not a documented mode.
     Invalid(ParseSnapshotModeError),
 }

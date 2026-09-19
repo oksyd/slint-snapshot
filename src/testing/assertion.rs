@@ -85,12 +85,16 @@ where
     /// Mismatches return [`SnapshotTestError::Mismatch`] with structured
     /// statistics and artifact paths. Failure artifacts are retained until a
     /// later failure for the same snapshot replaces them.
+    /// Artifact generation errors remain attached to the mismatch or missing
+    /// baseline error; they do not replace the primary failure. A mismatch's
+    /// diff path can be absent when its canvas would exceed the pixel budget.
     ///
     /// # Errors
     ///
     /// Returns an error for invalid image data, an invalid pixel budget,
     /// missing baselines in verification mode, PNG or filesystem failures,
-    /// and comparison mismatches.
+    /// and comparison mismatches. Equal or nested store roots are rejected
+    /// with [`SnapshotTestError::OverlappingRoots`] before any file is written.
     pub fn check(self) -> Result<SnapshotOutcome, SnapshotTestError> {
         if self.max_pixels == 0 {
             return Err(SnapshotTestError::InvalidPixelLimit {
@@ -101,6 +105,7 @@ where
         let actual =
             RgbaView::from_source(&self.actual).map_err(SnapshotTestError::InvalidActualImage)?;
         validate_actual_pixel_limit(actual.dimensions(), self.max_pixels)?;
+        self.store.validate()?;
         let paths = self.store.resolve(&self.name);
         let baseline_exists =
             paths
@@ -124,10 +129,10 @@ where
                 return Ok(SnapshotOutcome::created(paths.baseline));
             }
             SnapshotMode::Verify if !baseline_exists => {
-                let actual_path = write_missing_actual(&paths.artifact_dir, actual)?;
+                let actual_artifact = write_missing_actual(&paths.artifact_dir, actual);
                 return Err(SnapshotTestError::MissingBaseline {
                     baseline_path: paths.baseline,
-                    actual_path,
+                    actual_artifact,
                 });
             }
             SnapshotMode::Verify | SnapshotMode::CreateMissing => {}
@@ -144,7 +149,7 @@ where
                     actual,
                     self.policy,
                     self.max_pixels,
-                )?;
+                );
                 Err(SnapshotTestError::Mismatch(Box::new(
                     SnapshotMismatch::new(paths.baseline, self.policy, difference, artifacts),
                 )))
@@ -158,9 +163,12 @@ where
     ///
     /// Panics when the snapshot is missing, mismatched, invalid, or cannot be
     /// read or written.
+    #[track_caller]
     pub fn assert_match(self) -> SnapshotOutcome {
-        self.check()
-            .unwrap_or_else(|error| panic!("snapshot assertion failed: {error}"))
+        match self.check() {
+            Ok(outcome) => outcome,
+            Err(error) => panic!("snapshot assertion failed: {error}"),
+        }
     }
 }
 

@@ -154,14 +154,28 @@ impl<'a> From<&'a RenderedFrame> for RgbaView<'a> {
 #[non_exhaustive]
 pub enum InvalidRgbaImage {
     /// Width and height must both be non-zero.
-    EmptyDimensions { width: u32, height: u32 },
+    EmptyDimensions {
+        /// Requested width in physical pixels.
+        width: u32,
+        /// Requested height in physical pixels.
+        height: u32,
+    },
     /// Computing the required RGBA byte length overflowed this platform.
-    DimensionsOverflow { width: u32, height: u32 },
+    DimensionsOverflow {
+        /// Requested width in physical pixels.
+        width: u32,
+        /// Requested height in physical pixels.
+        height: u32,
+    },
     /// The pixel slice is not tightly packed RGBA8 data for the dimensions.
     InvalidBufferLength {
+        /// Requested width in physical pixels.
         width: u32,
+        /// Requested height in physical pixels.
         height: u32,
+        /// Required byte count for tightly packed RGBA8 pixels.
         expected_bytes: usize,
+        /// Number of bytes supplied by the caller.
         actual_bytes: usize,
     },
 }
@@ -206,7 +220,9 @@ pub enum ComparisonPolicy {
     /// strictly greater than `channel_delta_threshold`. The images match when
     /// the number of such pixels is at most `max_pixels_over_threshold`.
     PixelTolerance {
+        /// Largest permitted per-channel delta (inclusive, from 0 to 255).
         channel_delta_threshold: u8,
+        /// Maximum number of pixels allowed to exceed the channel threshold.
         max_pixels_over_threshold: u64,
     },
 }
@@ -232,6 +248,7 @@ impl ComparisonPolicy {
         }
     }
 
+    #[cfg(feature = "testing")]
     pub(crate) fn pixel_exceeds_threshold(self, expected: &[u8], actual: &[u8]) -> bool {
         let threshold = self.channel_delta_threshold();
         expected
@@ -376,16 +393,19 @@ pub fn compare(
     let mut maximum_channel_delta = 0_u8;
     for (expected_pixel, actual_pixel) in expected
         .rgba8()
-        .chunks_exact(4)
-        .zip(actual.rgba8().chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(actual.rgba8().as_chunks::<4>().0)
     {
-        if policy.pixel_exceeds_threshold(expected_pixel, actual_pixel) {
-            different_pixels += 1;
-        }
-        for (&expected_channel, &actual_channel) in expected_pixel.iter().zip(actual_pixel) {
-            maximum_channel_delta =
-                maximum_channel_delta.max(expected_channel.abs_diff(actual_channel));
-        }
+        let delta = expected_pixel
+            .iter()
+            .zip(actual_pixel)
+            .map(|(&expected, &actual)| expected.abs_diff(actual))
+            .max()
+            .unwrap_or(0);
+        different_pixels += u64::from(delta > policy.channel_delta_threshold());
+        maximum_channel_delta = maximum_channel_delta.max(delta);
     }
 
     let stats = DiffStats {

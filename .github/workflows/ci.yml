@@ -9,7 +9,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTUP_TOOLCHAIN: 1.98.1
+  RUSTUP_TOOLCHAIN: 1.99.1
 
 jobs:
   default-features:
@@ -22,7 +22,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.98.1 --profile minimal --component clippy,rustfmt
+        run: rustup toolchain install 1.99.1 --profile minimal --component clippy,rustfmt
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -83,7 +83,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.98.1 --profile minimal --component clippy,rustfmt
+        run: rustup toolchain install 1.99.1 --profile minimal --component clippy,rustfmt
 
       - name: Install Fontconfig development files
         if: runner.os == 'Linux'

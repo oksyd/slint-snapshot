@@ -112,7 +112,7 @@ slint_build::compile_with_config("ui/preview.slint", config)?;
 
 ```toml
 [build-dependencies]
-slint-build = "1.18.0"
+slint-build = "1.18.1"
 ```
 
 Enable host fonts with the `system-fonts` feature. On Linux this requires

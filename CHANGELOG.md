@@ -1,3 +1,8 @@
+## [0.1.3] - 2026-11-12
+
+### ⚙️ Miscellaneous Tasks
+
+- Release slint-snapshot version 0.1.3
 ## [0.1.2] - 2026-09-19
 
 ### 🐛 Bug Fixes

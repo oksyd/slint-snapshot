@@ -672,6 +672,7 @@ mod tests {
     use crate::frame::FrameWriteError;
 
     slint::slint! {
+        #[edition = "1.19"]
         export component DynamicPreferredSize inherits Window {
             in property <bool> expanded;
             in property <color> fill: #336699;

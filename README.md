@@ -15,6 +15,7 @@ use slint::ComponentHandle;
 use slint_snapshot::SnapshotRuntime;
 
 slint::slint! {
+    #[edition = "1.19"]
     export component Preview inherits Window {
         background: #202538;
     }
@@ -112,11 +113,11 @@ slint_build::compile_with_config("ui/preview.slint", config)?;
 
 ```toml
 [build-dependencies]
-slint-build = "1.18.1"
+slint-build = "1.19.0"
 ```
 
 Enable host fonts with the `system-fonts` feature. On Linux this requires
-Fontconfig development files. With Slint 1.18 it also enables software
+Fontconfig development files. With Slint 1.19 it also enables software
 rendering for `Path` elements; the default Fontconfig-free configuration does
 not render `Path` elements.
 

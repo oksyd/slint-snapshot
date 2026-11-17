@@ -40,6 +40,7 @@
 //! use slint_snapshot::SnapshotRuntime;
 //!
 //! slint::slint! {
+//!     #[edition = "1.19"]
 //!     export component ColorCard inherits Window {
 //!         background: #202538;
 //!         Rectangle {
